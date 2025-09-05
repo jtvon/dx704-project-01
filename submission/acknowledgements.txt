@@ -1,0 +1,77 @@
+Acknowledgements
+================
+I would like to thank the following resources for their assistance in this project:
+- My peers for their valuable feedback on Piazza; retrieving the data from Yahoo Finance was trickier than anticipated. Eventually copied and pasted the adj. close prices from the website into a spreadsheet to consolidate.
+- The content from this week's lesson material was very helpful, including the videos posted by Professor Considine.
+- I utilized GPT-5 for assistance on Part 8 which was the most difficult.
+
+Generative AI Prompts and Responses
+===================================
+
+Prompt 1:
+How would I go about checking the stability of the maximum return portfolio by resampling the estimated risk/return model?
+
+Response:
+Here’s a concise way to do the Part 8 resampling check. It simulates 23 monthly return draws from a multivariate normal with your estimated mean vector and covariance, recomputes which asset would be max-return (i.e., has the highest sample mean), repeats 1000 times, and writes the probabilities.
+
+```python
+n_sims = 1000
+asset_names = list(estimated_returns.index)
+n_assets = len(asset_names)
+n_periods = historical_returns.shape[0]  # 23
+means = estimated_returns.to_numpy()
+cov = estimated_covariance.to_numpy()
+
+# Symmetrize and add tiny jitter to ensure positive-definite covariance
+cov = (cov + cov.T) / 2
+cov = cov + 1e-10 * np.eye(n_assets)
+
+rng = np.random.default_rng(42)
+winner_counts = np.zeros(n_assets, dtype=int)
+for _ in range(n_sims):
+    sample = rng.multivariate_normal(mean=means, cov=cov, size=n_periods)
+    sample_means = sample.mean(axis=0)
+    winner_idx = int(np.argmax(sample_means))
+    winner_counts[winner_idx] += 1
+max_return_prob = winner_counts / n_sims
+```
+
+```python
+import os
+os.makedirs('submission', exist_ok=True)
+max_return_df = (
+    pd.DataFrame({'asset': asset_names, 'probability': max_return_prob})
+      .sort_values('probability', ascending=False)
+      .reset_index(drop=True)
+)
+max_return_df.to_csv('submission/max_return_probabilities.tsv', sep='\t', index=False)
+display(max_return_df)
+plt.figure(figsize=(8,4))
+plt.bar(max_return_df['asset'], max_return_df['probability'])
+plt.ylabel('Probability')
+plt.title('Probability Each Asset Has Highest Estimated Return (n_sims=1000)')
+plt.ylim(0, 1)
+plt.grid(axis='y', alpha=0.3)
+plt.show()
+```
+
+Prompt 2:
+What’s the point of adding the jitter portion?
+
+Response:
+- Symmetrize: (cov + cov.T)/2 enforces exact symmetry (floating-point ops can make cov slightly asymmetric).
+- Jitter: cov + 1e-10 I is a tiny ridge regularization that pushes any zero/negative eigenvalues positive. With only ~23 observations and correlated assets, the sample covariance can be nearly singular or slightly non–PSD, causing multivariate_normal to warn/fail.
+- The 1e-10 scale is negligible for portfolio stats but removes numerical issues.
+
+Example check:
+```python
+w, _ = np.linalg.eigh(cov)
+print('min eig before:', w.min())
+cov_fix = (cov + cov.T)/2 + 1e-10*np.eye(cov.shape[0])
+w_fix, _ = np.linalg.eigh(cov_fix)
+print('min eig after:', w_fix.min())
+```
+
+Alternatives:
+- Use shrinkage (e.g., Ledoit–Wolf) to get a PSD covariance.
+- Project to nearest PSD matrix by clipping small negative eigenvalues to zero.
